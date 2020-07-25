@@ -620,6 +620,12 @@ message ServiceSpec {
   // sessionAffinityConfig contains the configurations of session affinity.
   // +optional
   optional SessionAffinityConfig sessionAffinityConfig = 14;
+
+  // ipFamily determines what version of IP will be allocated for the service when
+  // k8s is in dual-stack mode.
+  // More info: https://kubernetes.io/docs/concepts/services-networking/dual-stack/#services
+  // +optional
+  optional string ipFamily = 15;
 }
 
 // ServiceStatus represents the current status of a service.

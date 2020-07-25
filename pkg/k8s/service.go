@@ -32,7 +32,7 @@ import (
 	serviceStore "github.com/cilium/cilium/pkg/service/store"
 
 	"github.com/sirupsen/logrus"
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 )
 
 func getAnnotationIncludeExternal(svc *slim_corev1.Service) bool {
@@ -145,8 +145,7 @@ func ParseService(svc *slim_corev1.Service, nodeAddressing datapath.NodeAddressi
 				proto := loadbalancer.L4Type(port.Protocol)
 				port := uint16(port.NodePort)
 				id := loadbalancer.ID(0) // will be allocated by k8s_watcher
-
-				if option.Config.EnableIPv4 &&
+				if svc.Spec.IPFamily == slim_corev1.IPv4Protocol &&
 					clusterIP != nil && !strings.Contains(svc.Spec.ClusterIP, ":") {
 
 					for _, ip := range nodeAddressing.IPv4().LoadBalancerNodeAddresses() {
@@ -155,7 +154,7 @@ func ParseService(svc *slim_corev1.Service, nodeAddressing datapath.NodeAddressi
 						svcInfo.NodePorts[portName][nodePortFE.String()] = nodePortFE
 					}
 				}
-				if option.Config.EnableIPv6 &&
+				if svc.Spec.IPFamily == slim_corev1.IPv6Protocol &&
 					clusterIP != nil && strings.Contains(svc.Spec.ClusterIP, ":") {
 
 					for _, ip := range nodeAddressing.IPv6().LoadBalancerNodeAddresses() {
