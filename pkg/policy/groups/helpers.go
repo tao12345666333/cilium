@@ -44,7 +44,9 @@ func getDerivativeName(cnp *cilium_v2.CiliumNetworkPolicy) string {
 }
 
 // createDerivativeCNP will return a new CNP based on the given rule.
-func createDerivativeCNP(ctx context.Context, cnp *cilium_v2.CiliumNetworkPolicy) (*cilium_v2.CiliumNetworkPolicy, error) {
+// ccnpDerived argument indicates if the provided CNP is derived from CCNP or not.
+// This is to make sure we call `Parse()` for the right construct so it don't fail.
+func createDerivativeCNP(ctx context.Context, cnp *cilium_v2.CiliumNetworkPolicy, ccnpDerived bool) (*cilium_v2.CiliumNetworkPolicy, error) {
 	// CNP informer may provide a CNP object without APIVersion or Kind.
 	// Setting manually to make sure that the derivative policy works ok.
 	derivativeCNP := &cilium_v2.CiliumNetworkPolicy{
@@ -65,9 +67,32 @@ func createDerivativeCNP(ctx context.Context, cnp *cilium_v2.CiliumNetworkPolicy
 		},
 	}
 
-	rules, err := cnp.Parse()
+	var (
+		rules api.Rules
+		err   error
+	)
+
+	if ccnpDerived {
+		// Temporary fix for CCNPs. See #12834.
+		// TL;DR. CCNPs are converted into SlimCNPs and end up here so we need to
+		// convert them back to CCNPs to allow proper parsing.
+		// For more details on implementation see - https://github.com/cilium/cilium/pull/12851
+		ccnp := &cilium_v2.CiliumClusterwideNetworkPolicy{
+			TypeMeta:            cnp.TypeMeta,
+			ObjectMeta:          cnp.ObjectMeta,
+			CiliumNetworkPolicy: cnp,
+			Status:              cnp.Status,
+		}
+
+		// Update the Kind of owner if the policy is CCNP derived.
+		derivativeCNP.ObjectMeta.OwnerReferences[0].Kind = cilium_v2.CCNPKindDefinition
+		rules, err = ccnp.Parse()
+	} else {
+		rules, err = cnp.Parse()
+	}
+
 	if err != nil {
-		return nil, fmt.Errorf("Cannot parse policies: %s", err)
+		return derivativeCNP, fmt.Errorf("cannot parse policies: %v", err)
 	}
 
 	derivativeCNP.Specs = make(api.Rules, len(rules))
@@ -110,7 +135,28 @@ func updateOrCreateCNP(cnp *cilium_v2.CiliumNetworkPolicy) (*cilium_v2.CiliumNet
 	return k8s.CiliumClient().CiliumV2().CiliumNetworkPolicies(cnp.ObjectMeta.Namespace).Create(context.TODO(), cnp, v1.CreateOptions{})
 }
 
-func updateDerivativeStatus(cnp *cilium_v2.CiliumNetworkPolicy, derivativeName string, err error) error {
+func updateOrCreateCCNP(cnp *cilium_v2.CiliumNetworkPolicy) (*cilium_v2.CiliumClusterwideNetworkPolicy, error) {
+	k8sCCNP, err := k8s.CiliumClient().CiliumV2().CiliumClusterwideNetworkPolicies().
+		Get(context.TODO(), cnp.ObjectMeta.Name, v1.GetOptions{})
+	if err == nil {
+		k8sCCNP.ObjectMeta.Labels = cnp.ObjectMeta.Labels
+		k8sCCNP.Spec = cnp.Spec
+		k8sCCNP.Specs = cnp.Specs
+		k8sCCNP.Status = cilium_v2.CiliumNetworkPolicyStatus{}
+
+		return k8s.CiliumClient().CiliumV2().CiliumClusterwideNetworkPolicies().Update(context.TODO(), k8sCCNP, v1.UpdateOptions{})
+	}
+
+	return k8s.CiliumClient().CiliumV2().CiliumClusterwideNetworkPolicies().
+		Create(context.TODO(), &cilium_v2.CiliumClusterwideNetworkPolicy{
+			TypeMeta:            cnp.TypeMeta,
+			ObjectMeta:          cnp.ObjectMeta,
+			CiliumNetworkPolicy: cnp,
+			Status:              cnp.Status,
+		}, v1.CreateOptions{})
+}
+
+func updateDerivativeStatus(cnp *cilium_v2.CiliumNetworkPolicy, derivativeName string, err error, clusterScoped bool) error {
 	status := cilium_v2.CiliumNetworkPolicyNodeStatus{
 		LastUpdated: slimv1.Now(),
 		Enforcing:   false,
@@ -123,24 +169,74 @@ func updateDerivativeStatus(cnp *cilium_v2.CiliumNetworkPolicy, derivativeName s
 		status.OK = true
 	}
 
+	if clusterScoped {
+		return updateDerivativeCNPStatus(cnp, status, derivativeName)
+	}
+
+	return updateDerivativeCCNPStatus(cnp, status, derivativeName)
+}
+
+func updateDerivativeCNPStatus(cnp *cilium_v2.CiliumNetworkPolicy, status cilium_v2.CiliumNetworkPolicyNodeStatus,
+	derivativeName string) error {
 	// This CNP can be modified by cilium agent or operator. To be able to push
 	// the status correctly fetch the last version to avoid updates issues.
-	k8sCNPStatus, clientErr := k8s.CiliumClient().CiliumV2().
-		CiliumNetworkPolicies(cnp.ObjectMeta.Namespace).
+	k8sCNP, clientErr := k8s.CiliumClient().CiliumV2().CiliumNetworkPolicies(cnp.ObjectMeta.Namespace).
 		Get(context.TODO(), cnp.ObjectMeta.Name, v1.GetOptions{})
+
 	if clientErr != nil {
-		return fmt.Errorf("Cannot get Kubernetes policy: %s", clientErr)
+		return fmt.Errorf("cannot get Kubernetes policy: %v", clientErr)
 	}
-	if k8sCNPStatus.ObjectMeta.UID != cnp.ObjectMeta.UID {
+
+	if k8sCNP.ObjectMeta.UID != cnp.ObjectMeta.UID {
 		// This case should not happen, but if the UID does not match make sure
 		// that the new policy is not in the cache to not loop over it. The
 		// kubernetes watcher should take care about that.
-		groupsCNPCache.DeleteCNP(k8sCNPStatus)
-		return fmt.Errorf("Policy UID mistmatch")
+		groupsCNPCache.DeleteCNP(k8sCNP)
+		return fmt.Errorf("policy UID mistmatch")
 	}
-	k8sCNPStatus.SetDerivedPolicyStatus(derivativeName, status)
-	groupsCNPCache.UpdateCNP(k8sCNPStatus)
-	// TODO: switch to JSON Patch
-	_, err = k8s.CiliumClient().CiliumV2().CiliumNetworkPolicies(cnp.ObjectMeta.Namespace).UpdateStatus(context.TODO(), cnp, v1.UpdateOptions{})
+
+	k8sCNP.SetDerivedPolicyStatus(derivativeName, status)
+	groupsCNPCache.UpdateCNP(k8sCNP)
+
+	// TODO: Switch to JSON patch.
+	_, err := k8s.CiliumClient().CiliumV2().CiliumNetworkPolicies(cnp.ObjectMeta.Namespace).
+		UpdateStatus(context.TODO(), k8sCNP, v1.UpdateOptions{})
+
 	return err
+}
+
+func updateDerivativeCCNPStatus(cnp *cilium_v2.CiliumNetworkPolicy, status cilium_v2.CiliumNetworkPolicyNodeStatus,
+	derivativeName string) error {
+	k8sCCNP, clientErr := k8s.CiliumClient().CiliumV2().CiliumClusterwideNetworkPolicies().
+		Get(context.TODO(), cnp.ObjectMeta.Name, v1.GetOptions{})
+
+	if clientErr != nil {
+		return fmt.Errorf("cannot get Kubernetes policy: %v", clientErr)
+	}
+
+	if k8sCCNP.ObjectMeta.UID != cnp.ObjectMeta.UID {
+		// This case should not happen, but if the UID does not match make sure
+		// that the new policy is not in the cache to not loop over it. The
+		// kubernetes watcher should take care of that.
+		groupsCNPCache.DeleteCNP(&cilium_v2.CiliumNetworkPolicy{
+			ObjectMeta: k8sCCNP.ObjectMeta,
+		})
+		return fmt.Errorf("policy UID mistmatch")
+	}
+
+	k8sCCNP.SetDerivedPolicyStatus(derivativeName, status)
+	groupsCNPCache.UpdateCNP(&cilium_v2.CiliumNetworkPolicy{
+		TypeMeta:   k8sCCNP.TypeMeta,
+		ObjectMeta: k8sCCNP.ObjectMeta,
+		Spec:       k8sCCNP.Spec,
+		Specs:      k8sCCNP.Specs,
+		Status:     k8sCCNP.Status,
+	})
+
+	// TODO: Switch to JSON patch
+	_, err := k8s.CiliumClient().CiliumV2().CiliumClusterwideNetworkPolicies().
+		UpdateStatus(context.TODO(), k8sCCNP, v1.UpdateOptions{})
+
+	return err
+
 }

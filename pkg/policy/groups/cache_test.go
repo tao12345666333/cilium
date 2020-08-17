@@ -21,7 +21,6 @@ import (
 )
 
 func (s *GroupsTestSuite) TestCacheWorkingCorrectly(c *C) {
-
 	cnps := groupsCNPCache.GetAllCNP()
 	c.Assert(len(cnps), Equals, 0)
 
@@ -35,5 +34,4 @@ func (s *GroupsTestSuite) TestCacheWorkingCorrectly(c *C) {
 
 	cnps = groupsCNPCache.GetAllCNP()
 	c.Assert(len(cnps), Equals, 0)
-
 }
