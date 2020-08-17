@@ -32,7 +32,7 @@ import (
 
 var (
 	errNoListener             = errors.New("no listener configured")
-	errNoTransportCredentials = errors.New("no transport credentials set (use serveroption.WithInsecure() or set credentials)")
+	errNoTransportCredentials = errors.New("no transport credentials set (use WithInsecure() or set credentials)")
 )
 
 // Server is hubble's gRPC server.
@@ -49,6 +49,12 @@ func NewServer(log logrus.FieldLogger, options ...serveroption.Option) (*Server,
 		if err := opt(&opts); err != nil {
 			return nil, fmt.Errorf("failed to apply option: %v", err)
 		}
+	}
+	if opts.Listener == nil {
+		return nil, errNoListener
+	}
+	if opts.TransportCredentials == nil && !opts.Insecure {
+		return nil, errNoTransportCredentials
 	}
 	return &Server{log: log, opts: opts}, nil
 }
