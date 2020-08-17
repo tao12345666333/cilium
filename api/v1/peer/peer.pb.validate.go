@@ -113,6 +113,16 @@ func (m *ChangeNotification) Validate() error {
 
 	// no validation rules for Address
 
+	if v, ok := interface{}(m.GetTls()).(interface{ Validate() error }); ok {
+		if err := v.Validate(); err != nil {
+			return ChangeNotificationValidationError{
+				field:  "Tls",
+				reason: "embedded message failed validation",
+				cause:  err,
+			}
+		}
+	}
+
 	// no validation rules for Type
 
 	return nil
@@ -173,3 +183,69 @@ var _ interface {
 	Cause() error
 	ErrorName() string
 } = ChangeNotificationValidationError{}
+
+// Validate checks the field values on TLS with the rules defined in the proto
+// definition for this message. If any rules are violated, an error is returned.
+func (m *TLS) Validate() error {
+	if m == nil {
+		return nil
+	}
+
+	// no validation rules for ServerName
+
+	return nil
+}
+
+// TLSValidationError is the validation error returned by TLS.Validate if the
+// designated constraints aren't met.
+type TLSValidationError struct {
+	field  string
+	reason string
+	cause  error
+	key    bool
+}
+
+// Field function returns field value.
+func (e TLSValidationError) Field() string { return e.field }
+
+// Reason function returns reason value.
+func (e TLSValidationError) Reason() string { return e.reason }
+
+// Cause function returns cause value.
+func (e TLSValidationError) Cause() error { return e.cause }
+
+// Key function returns key value.
+func (e TLSValidationError) Key() bool { return e.key }
+
+// ErrorName returns error name.
+func (e TLSValidationError) ErrorName() string { return "TLSValidationError" }
+
+// Error satisfies the builtin error interface
+func (e TLSValidationError) Error() string {
+	cause := ""
+	if e.cause != nil {
+		cause = fmt.Sprintf(" | caused by: %v", e.cause)
+	}
+
+	key := ""
+	if e.key {
+		key = "key for "
+	}
+
+	return fmt.Sprintf(
+		"invalid %sTLS.%s: %s%s",
+		key,
+		e.field,
+		e.reason,
+		cause)
+}
+
+var _ error = TLSValidationError{}
+
+var _ interface {
+	Field() string
+	Reason() string
+	Key() bool
+	Cause() error
+	ErrorName() string
+} = TLSValidationError{}
