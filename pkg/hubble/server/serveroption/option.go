@@ -34,7 +34,7 @@ import (
 // Options stores all the configuration values for the hubble server.
 type Options struct {
 	TCPListener        net.Listener
-	UnixSocketListener net.Listener
+	UnixSocketListener *net.UnixListener
 	HealthService      healthpb.HealthServer
 	ObserverService    observerpb.ObserverServer
 	PeerService        peerpb.PeerServer
@@ -64,21 +64,27 @@ func WithTCPListener(address string) Option {
 // owner is set to socketGroup.
 func WithUnixSocketListener(path string) Option {
 	return func(o *Options) error {
+		if o.UnixSocketListener != nil {
+			if fp, err := o.UnixSocketListener.File(); err == nil {
+				return fmt.Errorf("unix listener already configured: %s", fp.Name())
+			}
+			return fmt.Errorf("unix listener already configured")
+		}
 		socketPath := strings.TrimPrefix(path, "unix://")
 		unix.Unlink(socketPath)
-		socket, err := net.Listen("unix", socketPath)
+		addr, err := net.ResolveUnixAddr("unix", socketPath)
+		if err != nil {
+			return err
+		}
+		socket, err := net.ListenUnix("unix", addr)
 		if err != nil {
 			return err
 		}
 		if os.Getuid() == 0 {
 			if err := api.SetDefaultPermissions(socketPath); err != nil {
+				socket.Close()
 				return err
 			}
-		}
-		if o.UnixSocketListener != nil {
-			socket.Close()
-			unix.Unlink(socketPath)
-			return fmt.Errorf("listener already configured: %s", path)
 		}
 		o.UnixSocketListener = socket
 		return nil
