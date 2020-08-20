@@ -57,13 +57,22 @@ func (s *GroupsTestSuite) TestCorrectDerivativeName(c *C) {
 		derivativeCNP.ObjectMeta.Name,
 		Equals,
 		fmt.Sprintf("%s-togroups-%s", name, cnp.ObjectMeta.UID))
+
+	// Test clusterwide policy helper functions
+	ccnpName := "ccnp-test"
+	ccnp := getSamplePolicy(ccnpName, "")
+	derivativeCCNP, err := createDerivativeCNP(context.TODO(), ccnp, true)
+
+	c.Assert(err, IsNil)
+	c.Assert(
+		derivativeCCNP.ObjectMeta.Name,
+		Equals,
+		fmt.Sprintf("%s-togroups-%s", ccnpName, ccnp.ObjectMeta.UID),
+	)
 }
 
 func (s *GroupsTestSuite) TestDerivativePoliciesAreDeletedIfNoToGroups(c *C) {
-	name := "test"
-	cnp := getSamplePolicy(name, "testns")
-
-	cnp.Spec.Egress = []api.EgressRule{
+	egressRule := []api.EgressRule{
 		{
 			ToPorts: []api.PortRule{
 				{
@@ -75,10 +84,25 @@ func (s *GroupsTestSuite) TestDerivativePoliciesAreDeletedIfNoToGroups(c *C) {
 		},
 	}
 
+	name := "test"
+	cnp := getSamplePolicy(name, "testns")
+
+	cnp.Spec.Egress = egressRule
+
 	derivativeCNP, err := createDerivativeCNP(context.TODO(), cnp, false)
 	c.Assert(err, IsNil)
 	c.Assert(derivativeCNP.Specs[0].Egress, checker.DeepEquals, cnp.Spec.Egress)
 	c.Assert(len(derivativeCNP.Specs), Equals, 1)
+
+	// Clusterwide policies
+	ccnpName := "ccnp-test"
+	ccnp := getSamplePolicy(ccnpName, "")
+	ccnp.Spec.Egress = egressRule
+
+	derivativeCCNP, err := createDerivativeCNP(context.TODO(), ccnp, true)
+	c.Assert(err, IsNil)
+	c.Assert(derivativeCCNP.Specs[0].Egress, checker.DeepEquals, ccnp.Spec.Egress)
+	c.Assert(len(derivativeCCNP.Specs), Equals, 1)
 }
 
 func (s *GroupsTestSuite) TestDerivativePoliciesAreInheritCorrectly(c *C) {
@@ -86,12 +110,7 @@ func (s *GroupsTestSuite) TestDerivativePoliciesAreInheritCorrectly(c *C) {
 		return []net.IP{net.ParseIP("192.168.1.1")}, nil
 	}
 
-	api.RegisterToGroupsProvider(api.AWSProvider, cb)
-
-	name := "test"
-	cnp := getSamplePolicy(name, "testns")
-
-	cnp.Spec.Egress = []api.EgressRule{
+	egressRule := []api.EgressRule{
 		{
 			ToPorts: []api.PortRule{
 				{
@@ -112,10 +131,29 @@ func (s *GroupsTestSuite) TestDerivativePoliciesAreInheritCorrectly(c *C) {
 		},
 	}
 
+	api.RegisterToGroupsProvider(api.AWSProvider, cb)
+
+	name := "test"
+	cnp := getSamplePolicy(name, "testns")
+
+	cnp.Spec.Egress = egressRule
+
 	derivativeCNP, err := createDerivativeCNP(context.TODO(), cnp, false)
 	c.Assert(err, IsNil)
 	c.Assert(derivativeCNP.Spec, IsNil)
 	c.Assert(len(derivativeCNP.Specs), Equals, 1)
 	c.Assert(derivativeCNP.Specs[0].Egress[0].ToPorts, checker.DeepEquals, cnp.Spec.Egress[0].ToPorts)
 	c.Assert(len(derivativeCNP.Specs[0].Egress[0].ToGroups), Equals, 0)
+
+	// Clusterwide policies
+	ccnpName := "ccnp-test"
+	ccnp := getSamplePolicy(ccnpName, "")
+	ccnp.Spec.Egress = egressRule
+
+	derivativeCCNP, err := createDerivativeCNP(context.TODO(), ccnp, true)
+	c.Assert(err, IsNil)
+	c.Assert(derivativeCCNP.Spec, IsNil)
+	c.Assert(len(derivativeCCNP.Specs), Equals, 1)
+	c.Assert(derivativeCCNP.Specs[0].Egress[0].ToPorts, checker.DeepEquals, ccnp.Spec.Egress[0].ToPorts)
+	c.Assert(len(derivativeCCNP.Specs[0].Egress[0].ToGroups), Equals, 0)
 }
