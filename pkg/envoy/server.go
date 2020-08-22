@@ -21,7 +21,6 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
@@ -991,48 +990,6 @@ func getPortNetworkPolicyRule(sel policy.CachedSelector, wildcard bool, l7Parser
 	return r, canShortCircuit
 }
 
-func getWildcardNetworkPolicyRule(selectors policy.L7DataMap) *cilium.PortNetworkPolicyRule {
-	// Use map to remove duplicates
-	remoteMap := make(map[uint64]struct{})
-	wildcardFound := false
-	for sel, l7 := range selectors {
-		if sel.IsWildcard() {
-			wildcardFound = true
-			break
-		}
-
-		for _, id := range sel.GetSelections() {
-			remoteMap[uint64(id)] = struct{}{}
-		}
-
-		if l7 != nil {
-			log.Warningf("L3-only rule for selector %v surprisingly has L7 rules (%v)!", sel, *l7)
-		}
-	}
-
-	if wildcardFound {
-		// Optimize the policy if the endpoint selector is a wildcard by
-		// keeping remote policies list empty to match all remote policies.
-		remoteMap = nil
-	} else if len(remoteMap) == 0 {
-		// No remote policies would match this rule. Discard it.
-		return nil
-	}
-
-	// Convert to a sorted slice
-	remotePolicies := make([]uint64, 0, len(remoteMap))
-	for id := range remoteMap {
-		remotePolicies = append(remotePolicies, id)
-	}
-	sort.Slice(remotePolicies, func(i, j int) bool {
-		return remotePolicies[i] < remotePolicies[j]
-	})
-
-	return &cilium.PortNetworkPolicyRule{
-		RemotePolicies: remotePolicies,
-	}
-}
-
 func getDirectionNetworkPolicy(ep logger.EndpointUpdater, l4Policy policy.L4PolicyMap, policyEnforced bool) []*cilium.PortNetworkPolicy {
 	if !policyEnforced {
 		// Return an allow-all policy.
@@ -1075,15 +1032,13 @@ func getDirectionNetworkPolicy(ep logger.EndpointUpdater, l4Policy policy.L4Poli
 		if port == 0 {
 			// L3-only rule, must generate L7 allow-all in case there are other
 			// port-specific rules. Otherwise traffic from allowed remotes could be dropped.
-			rule := getWildcardNetworkPolicyRule(l4.L7RulesPerSelector)
-			if rule != nil {
-				if len(rule.RemotePolicies) == 0 && rule.L7 == nil {
-					// Got an allow-all rule, which can short-circuit all of
-					// the other rules.
-					allowAll = true
-				}
-				rules = append(rules, rule)
-			}
+			// An l3-only rule effectively a wildcard for the proxy, as the bpf datapath
+			// verdict is final for it.
+			rule := &cilium.PortNetworkPolicyRule{}
+			// Got an allow-all rule, which can short-circuit all of
+			// the other rules.
+			allowAll = true
+			rules = append(rules, rule)
 		} else {
 			nSelectors := len(l4.L7RulesPerSelector)
 			for sel, l7 := range l4.L7RulesPerSelector {
@@ -1091,7 +1046,9 @@ func getDirectionNetworkPolicy(ep logger.EndpointUpdater, l4Policy policy.L4Poli
 				// only allowed l3. If there are multiple selectors for this l4-filter
 				// then the proxy may need to drop some allowed l3 due to l7 rules potentially
 				// being different between the selectors.
-				wildcard := nSelectors == 1 || sel.IsWildcard()
+				// An l3-only, l4-only, or l3/l4 rule w/o l7 is also effectively a wildcard
+				// for the proxy, as the bpf datapath verdict is final for these.
+				wildcard := nSelectors == 1 || l7 == nil || sel.IsWildcard()
 				rule, cs := getPortNetworkPolicyRule(sel, wildcard, l4.L7Parser, l7)
 				if rule != nil {
 					if !cs {

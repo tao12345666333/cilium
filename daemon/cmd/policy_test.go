@@ -342,11 +342,6 @@ func (ds *DaemonSuite) TestUpdateConsumerMap(c *C) {
 			{
 				Port:     0,
 				Protocol: envoy_config_core.SocketAddress_TCP,
-				Rules: []*cilium.PortNetworkPolicyRule{
-					{
-						RemotePolicies: expectedRemotePolicies,
-					},
-				},
 			},
 			{
 				Port:     80,
@@ -386,11 +381,6 @@ func (ds *DaemonSuite) TestUpdateConsumerMap(c *C) {
 			{
 				Port:     0,
 				Protocol: envoy_config_core.SocketAddress_TCP,
-				Rules: []*cilium.PortNetworkPolicyRule{
-					{
-						RemotePolicies: expectedRemotePolicies,
-					},
-				},
 			},
 			{
 				Port:     80,
@@ -641,11 +631,6 @@ func (ds *DaemonSuite) TestL3_dependent_L7(c *C) {
 			{
 				Port:     0,
 				Protocol: envoy_config_core.SocketAddress_TCP,
-				Rules: []*cilium.PortNetworkPolicyRule{
-					{
-						RemotePolicies: []uint64{uint64(qaJoeSecLblsCtx.ID)},
-					},
-				},
 			},
 			{
 				Port:     80,
@@ -882,25 +867,37 @@ func (ds *DaemonSuite) TestIncrementalPolicy(c *C) {
 	// Create the endpoint and generate its policy.
 	e := ds.prepareEndpoint(c, qaBarSecLblsCtx, true)
 
+	expectedBarNetworkPolicy := &cilium.NetworkPolicy{
+		Name:             QAIPv4Addr.String(),
+		Policy:           uint64(qaBarSecLblsCtx.ID),
+		ConntrackMapName: "global",
+		IngressPerPortPolicies: []*cilium.PortNetworkPolicy{
+			{
+				Port:     0,
+				Protocol: envoy_config_core.SocketAddress_TCP,
+			},
+			{
+				Port:     80,
+				Protocol: envoy_config_core.SocketAddress_TCP,
+				Rules: []*cilium.PortNetworkPolicyRule{
+					{
+						L7: &PNPAllowGETbar,
+					},
+				},
+			},
+		},
+		EgressPerPortPolicies: []*cilium.PortNetworkPolicy{ // Allow-all policy.
+			{Protocol: envoy_config_core.SocketAddress_TCP},
+			{Protocol: envoy_config_core.SocketAddress_UDP},
+		},
+	}
+
 	// Check that the policy has been updated in the xDS cache for the L7
 	// proxies.
 	networkPolicies := ds.getXDSNetworkPolicies(c, nil)
 	c.Assert(networkPolicies, HasLen, 2)
 	qaBarNetworkPolicy := networkPolicies[QAIPv4Addr.String()]
-	c.Assert(qaBarNetworkPolicy, Not(IsNil))
-
-	c.Assert(qaBarNetworkPolicy.IngressPerPortPolicies, HasLen, 1)
-
-	expectedIngresskPolicy := &cilium.PortNetworkPolicy{
-		Port:     80,
-		Protocol: envoy_config_core.SocketAddress_TCP,
-		Rules: []*cilium.PortNetworkPolicyRule{
-			{
-				L7: &PNPAllowGETbar,
-			},
-		},
-	}
-	c.Assert(qaBarNetworkPolicy.IngressPerPortPolicies[0], checker.Equals, expectedIngresskPolicy)
+	c.Assert(qaBarNetworkPolicy, checker.Equals, expectedBarNetworkPolicy)
 
 	// Allocate identities needed for this test
 	qaFooLbls := labels.Labels{lblFoo.Key: lblFoo, lblQA.Key: lblQA}
@@ -924,35 +921,7 @@ func (ds *DaemonSuite) TestIncrementalPolicy(c *C) {
 		return qaBarNetworkPolicy != nil && len(qaBarNetworkPolicy.IngressPerPortPolicies) == 2
 	}, time.Second*1)
 	c.Assert(err, IsNil)
-	c.Assert(qaBarNetworkPolicy, checker.Equals, &cilium.NetworkPolicy{
-		Name:             QAIPv4Addr.String(),
-		Policy:           uint64(qaBarSecLblsCtx.ID),
-		ConntrackMapName: "global",
-		IngressPerPortPolicies: []*cilium.PortNetworkPolicy{
-			{
-				Port:     0,
-				Protocol: envoy_config_core.SocketAddress_TCP,
-				Rules: []*cilium.PortNetworkPolicyRule{
-					{
-						RemotePolicies: []uint64{uint64(qaFooID.ID)},
-					},
-				},
-			},
-			{
-				Port:     80,
-				Protocol: envoy_config_core.SocketAddress_TCP,
-				Rules: []*cilium.PortNetworkPolicyRule{
-					{
-						L7: &PNPAllowGETbar,
-					},
-				},
-			},
-		},
-		EgressPerPortPolicies: []*cilium.PortNetworkPolicy{ // Allow-all policy.
-			{Protocol: envoy_config_core.SocketAddress_TCP},
-			{Protocol: envoy_config_core.SocketAddress_UDP},
-		},
-	})
+	c.Assert(qaBarNetworkPolicy, checker.Equals, expectedBarNetworkPolicy)
 
 	// Delete the endpoint.
 	e.Delete(ds.d, ds.d.ipam, &dummyManager{}, endpoint.DeleteConfig{})
