@@ -355,7 +355,6 @@ func (ds *DaemonSuite) TestUpdateConsumerMap(c *C) {
 		},
 		EgressPerPortPolicies: []*cilium.PortNetworkPolicy{ // Allow-all policy.
 			{Protocol: envoy_config_core.SocketAddress_TCP},
-			{Protocol: envoy_config_core.SocketAddress_UDP},
 		},
 	}
 	c.Assert(qaBarNetworkPolicy, checker.Equals, expectedNetworkPolicy)
@@ -394,7 +393,6 @@ func (ds *DaemonSuite) TestUpdateConsumerMap(c *C) {
 		},
 		EgressPerPortPolicies: []*cilium.PortNetworkPolicy{ // Allow-all policy.
 			{Protocol: envoy_config_core.SocketAddress_TCP},
-			{Protocol: envoy_config_core.SocketAddress_UDP},
 		},
 	}
 	c.Assert(prodBarNetworkPolicy, checker.Equals, expectedNetworkPolicy)
@@ -474,7 +472,6 @@ func (ds *DaemonSuite) TestL4_L7_Shadowing(c *C) {
 		},
 		EgressPerPortPolicies: []*cilium.PortNetworkPolicy{ // Allow-all policy.
 			{Protocol: envoy_config_core.SocketAddress_TCP},
-			{Protocol: envoy_config_core.SocketAddress_UDP},
 		},
 	}
 	c.Assert(qaBarNetworkPolicy, checker.Equals, expectedNetworkPolicy)
@@ -551,7 +548,6 @@ func (ds *DaemonSuite) TestL4_L7_ShadowingShortCircuit(c *C) {
 		},
 		EgressPerPortPolicies: []*cilium.PortNetworkPolicy{ // Allow-all policy.
 			{Protocol: envoy_config_core.SocketAddress_TCP},
-			{Protocol: envoy_config_core.SocketAddress_UDP},
 		},
 	}
 	c.Assert(qaBarNetworkPolicy, checker.Equals, expectedNetworkPolicy)
@@ -644,7 +640,6 @@ func (ds *DaemonSuite) TestL3_dependent_L7(c *C) {
 		},
 		EgressPerPortPolicies: []*cilium.PortNetworkPolicy{ // Allow-all policy.
 			{Protocol: envoy_config_core.SocketAddress_TCP},
-			{Protocol: envoy_config_core.SocketAddress_UDP},
 		},
 	}
 	c.Assert(qaBarNetworkPolicy, checker.Equals, expectedNetworkPolicy)
@@ -888,7 +883,6 @@ func (ds *DaemonSuite) TestIncrementalPolicy(c *C) {
 		},
 		EgressPerPortPolicies: []*cilium.PortNetworkPolicy{ // Allow-all policy.
 			{Protocol: envoy_config_core.SocketAddress_TCP},
-			{Protocol: envoy_config_core.SocketAddress_UDP},
 		},
 	}
 
